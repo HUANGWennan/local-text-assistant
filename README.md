@@ -1,4 +1,4 @@
-# 本地文字助手 · Local Text Helper for macOS
+# 本地文字助手 · Local Text Assistant for macOS
 
 macOS 菜单栏助手。开启辅助功能权限后，在其他应用中选中文字，浮动面板会显示以下操作：
 
@@ -19,7 +19,7 @@ macOS 菜单栏助手。开启辅助功能权限后，在其他应用中选中�
 ```sh
 ollama pull qwen3.5:4b
 sh build.sh
-open "build/Local Text Helper.app"
+open "build/Local Text Assistant.app"
 ```
 
 从菜单栏选择「启用选区功能」并按系统提示开启辅助功能权限。使用截图功能时另需屏幕录制权限。权限变更后可能需要重新打开应用。

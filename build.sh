@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 cd "$(dirname "$0")"
-app="build/Local Text Helper.app"
+app="build/Local Text Assistant.app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 xcrun swiftc -target "$(uname -m)-apple-macos26.0" main.swift OCRRegionCapture.swift SelectionSpeech.swift SelectionPanel.swift \
     -o "$app/Contents/MacOS/LocalTextHelper" -framework AppKit -framework ApplicationServices \
