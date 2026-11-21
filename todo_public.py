@@ -19,6 +19,7 @@ def reviewed_events(payload):
     for event in events:
         title = event.get("title")
         due = event.get("due_date", "")
+        notes = event.get("notes", "")
         if not isinstance(title, str) or not 0 < len(title.strip()) <= 255:
             raise ValueError("任务标题须为 1–255 个字符。")
         try:
@@ -27,7 +28,9 @@ def reviewed_events(payload):
             valid_due = False
         if not valid_due:
             raise ValueError("截止日期请用 YYYY-MM-DD，或留空。")
-        reviewed.append({"title": " ".join(title.split()), "due_date": due})
+        if not isinstance(notes, str) or len(notes) > 24000:
+            raise ValueError("任务备注不得超过 24000 个字符。")
+        reviewed.append({"title": " ".join(title.split()), "due_date": due, "notes": notes.strip()})
     return reviewed
 
 
@@ -60,15 +63,6 @@ def graph(events):
     raise RuntimeError("Microsoft To Do 未返回确认。请核对已有任务后重试。")
 
 
-def preview(events):
-    lines = []
-    for event in events:
-        due = event["due_date"] or "无"
-        lines.append(f'{event["title"]} · 截止日期：{due}')
-        lines.extend(f'  需核对：{issue}' for issue in event["issues"])
-    return "\n".join(lines)
-
-
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("mode", choices=["extract", "create"])
@@ -80,7 +74,6 @@ def main():
             if not isinstance(text, str):
                 raise ValueError("请先选中待办相关文字。")
             result = extract(text)
-            result["text"] = preview(result["events"])
         else:
             result = graph(reviewed_events(payload))
         print(json.dumps(result, ensure_ascii=False))

@@ -36,6 +36,12 @@ function Canonical([string]$title) {
     return [regex]::Replace($title.Normalize([Text.NormalizationForm]::FormKC),'\s+',' ').Trim()
 }
 
+function Notes-Match($task,[string]$notes) {
+    if (-not $notes) {return $true}
+    $savedNotes=([string]$task.body.content).Replace("`r`n","`n").Trim()
+    return $savedNotes -ceq $notes.Replace("`r`n","`n").Trim()
+}
+
 function Due-Day($task) {
     if (-not $task.dueDateTime) {return ''}
     $stamp=$task.dueDateTime.dateTime
@@ -77,6 +83,7 @@ try {
     foreach ($event in $data.events) {
         $title=[string]$event.title
         $due=[string]$event.due_date
+        $notes=([string]$event.notes).Trim()
         $canonical=Canonical $title
         if (-not $canonical -or $title.Length -gt 255) {throw '任务标题无效。'}
         if ($due) {[void][DateTime]::ParseExact($due,'yyyy-MM-dd',[Globalization.CultureInfo]::InvariantCulture)}
@@ -86,6 +93,7 @@ try {
         if ($existing.Count -gt 1) {throw '发现多个同名任务，请先核对。'}
         if ($existing.Count -eq 1) {
             if ((Due-Day $existing[0]) -ne $due) {throw '已有同名任务的截止日期不同，请先核对。'}
+            if (-not (Notes-Match $existing[0] $notes)) {throw '已有同名任务的备注不同，请先核对。'}
             if ($ledger.Contains($key)) {
                 $ledger.Remove($key)
                 Save-Json $ledgerPath $ledger
@@ -95,6 +103,7 @@ try {
             if ($ledger.Contains($key)) {throw '上次提交结果仍不确定，请先在 To Do 核对。'}
             $body=@{title=$title}
             if ($due) {$body.dueDateTime=@{dateTime=$due+'T00:00:00';timeZone='UTC'}}
+            if ($notes) {$body.body=@{contentType='text';content=$notes}}
             # Retain a marker across crashes/timeouts so the same task is never blindly POSTed again.
             $ledger[$key]=$true
             Save-Json $ledgerPath $ledger
@@ -104,6 +113,7 @@ try {
             if ((Canonical $check.title) -cne $canonical -or (Due-Day $check) -ne $due) {
                 throw '任务已提交，但标题或日期尚未核验。'
             }
+            if (-not (Notes-Match $check $notes)) {throw '任务已提交，但备注尚未核验。'}
             $ledger.Remove($key)
             Save-Json $ledgerPath $ledger
             $message='已加入：'+$title

@@ -1,6 +1,104 @@
 import AppKit
 import ApplicationServices
 
+private struct ToDoDraft {
+    var title: String
+    var dueDate: String
+    var notes: String
+    var issues: [String]
+
+    init?(_ event: [String: Any]) {
+        guard let title = event["title"] as? String,
+              let dueDate = event["due_date"] as? String,
+              let issues = event["issues"] as? [String] else { return nil }
+        self.title = title
+        self.dueDate = dueDate
+        self.issues = issues
+        notes = event["notes"] as? String ?? ""
+    }
+
+    var payload: [String: String] {
+        ["title": title, "due_date": dueDate, "notes": notes]
+    }
+}
+
+private final class ToDoSelectionAlert: NSObject {
+    private let alert = NSAlert()
+    private let selectAll = NSButton(checkboxWithTitle: "全选", target: nil, action: nil)
+    private let checkboxes: [NSButton]
+    private let addButton: NSButton
+
+    init(tasks: [ToDoDraft]) {
+        checkboxes = tasks.map { task in
+            let title = task.dueDate.isEmpty ? task.title : "\(task.title) [\(task.dueDate)]"
+            let checkbox = NSButton(checkboxWithTitle: title, target: nil, action: nil)
+            checkbox.cell?.wraps = true
+            checkbox.cell?.lineBreakMode = .byWordWrapping
+            return checkbox
+        }
+        alert.messageText = "识别到 \(tasks.count) 个活动"
+        alert.informativeText = "勾选要加入 Microsoft To Do 的活动。"
+        addButton = alert.addButton(withTitle: "加入所选")
+        let cancelButton = alert.addButton(withTitle: "取消")
+        cancelButton.keyEquivalent = "\u{1B}"
+        super.init()
+
+        let listWidth: CGFloat = 356
+        let rowWidth = listWidth - 18
+        let rows = NSStackView(views: checkboxes)
+        rows.orientation = .vertical
+        rows.alignment = .leading
+        rows.spacing = 4
+        rows.edgeInsets = NSEdgeInsets(top: 3, left: 1, bottom: 3, right: 0)
+        for checkbox in checkboxes {
+            let bounds = NSRect(x: 0, y: 0, width: rowWidth, height: 10_000)
+            let height = ceil(checkbox.cell?.cellSize(forBounds: bounds).height ?? 22)
+            checkbox.widthAnchor.constraint(equalToConstant: rowWidth).isActive = true
+            checkbox.heightAnchor.constraint(equalToConstant: max(22, height + 4)).isActive = true
+            checkbox.target = self
+            checkbox.action = #selector(updateSelection)
+        }
+        let contentHeight = rows.fittingSize.height
+        rows.frame = NSRect(x: 0, y: 0, width: rowWidth + 1, height: contentHeight)
+        let visibleHeight = min(contentHeight, 250)
+        let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: listWidth, height: visibleHeight))
+        scroll.hasVerticalScroller = contentHeight > visibleHeight
+        scroll.drawsBackground = false
+        scroll.documentView = rows
+        scroll.contentView.scroll(to: NSPoint(x: 0, y: rows.isFlipped ? 0 : contentHeight - visibleHeight))
+        scroll.reflectScrolledClipView(scroll.contentView)
+
+        let preview = NSView(frame: NSRect(x: 0, y: 0, width: listWidth, height: visibleHeight + 28))
+        selectAll.frame = NSRect(x: 1, y: visibleHeight + 4, width: rowWidth, height: 22)
+        selectAll.target = self
+        selectAll.action = #selector(toggleAll)
+        preview.addSubview(selectAll)
+        preview.addSubview(scroll)
+        alert.accessoryView = preview
+        alert.layout()
+        alert.window.initialFirstResponder = selectAll
+        updateSelection()
+    }
+
+    func selectedTasks(from tasks: [ToDoDraft], present: (NSAlert) -> NSApplication.ModalResponse) -> [ToDoDraft]? {
+        guard present(alert) == .alertFirstButtonReturn else { return nil }
+        return zip(tasks, checkboxes).compactMap { task, checkbox in
+            checkbox.state == .on ? task : nil
+        }
+    }
+
+    @objc private func toggleAll() {
+        for checkbox in checkboxes { checkbox.state = selectAll.state }
+        updateSelection()
+    }
+
+    @objc private func updateSelection() {
+        let selectedCount = checkboxes.filter { $0.state == .on }.count
+        selectAll.state = selectedCount == checkboxes.count ? .on : .off
+        addButton.isEnabled = selectedCount > 0
+    }
+}
+
 final class TextHelper: NSObject, NSApplicationDelegate {
     private let status = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let reader = SelectionSpeechReader()
@@ -200,24 +298,69 @@ final class TextHelper: NSObject, NSApplicationDelegate {
             showError("未识别到可加入 To Do 的任务。")
             return
         }
-        let alert = NSAlert()
-        alert.messageText = "确认加入 Microsoft To Do"
-        alert.informativeText = result["text"] as? String ?? ""
-        let eligible = events.filter { event in
-            guard let issues = event["issues"] as? [String] else { return false }
-            return issues.isEmpty
+        let drafts = events.compactMap(ToDoDraft.init)
+        guard drafts.count == events.count else {
+            showError("无法读取完整的任务信息。")
+            return
         }
-        let canCreate = eligible.count == events.count
-        if canCreate { alert.addButton(withTitle: "确认添加") }
-        alert.addButton(withTitle: canCreate ? "取消" : "关闭")
-        guard runPreview(alert) == .alertFirstButtonReturn, canCreate else { return }
-        runHelper("todo_public.py", mode: "create", payload: ["events": eligible]) { result in
+        var selected = drafts
+        if drafts.count > 1 {
+            let picker = ToDoSelectionAlert(tasks: drafts)
+            guard let chosen = picker.selectedTasks(from: drafts, present: runPreview), !chosen.isEmpty else { return }
+            selected = chosen
+        }
+        for index in selected.indices where drafts.count == 1 || !selected[index].issues.isEmpty || !selected[index].notes.isEmpty {
+            guard let reviewed = reviewTask(selected[index]) else { return }
+            selected[index] = reviewed
+        }
+        runHelper("todo_public.py", mode: "create", payload: ["events": selected.map(\.payload)]) { result in
             let report = NSAlert()
             report.messageText = "Microsoft To Do 处理结果"
             report.informativeText = result["text"] as? String ?? "处理已结束。"
             report.addButton(withTitle: "好")
             _ = self.runPreview(report)
         }
+    }
+
+    private func reviewTask(_ draft: ToDoDraft) -> ToDoDraft? {
+        let alert = NSAlert()
+        alert.messageText = "确认任务信息"
+        alert.informativeText = draft.issues.joined(separator: "\n")
+
+        let accessory = NSView(frame: NSRect(x: 0, y: 0, width: 420, height: 236))
+        let title = NSTextField(string: draft.title)
+        title.frame = NSRect(x: 68, y: 203, width: 352, height: 26)
+        title.setAccessibilityLabel("标题")
+        let date = NSTextField(string: draft.dueDate)
+        date.frame = NSRect(x: 68, y: 166, width: 352, height: 26)
+        date.placeholderString = "YYYY-MM-DD（可留空）"
+        date.setAccessibilityLabel("截止日期")
+        for (name, y) in [("标题", 206.0), ("截止日期", 169.0), ("备注", 134.0)] {
+            let label = NSTextField(labelWithString: name)
+            label.frame = NSRect(x: 0, y: CGFloat(y), width: 66, height: 22)
+            accessory.addSubview(label)
+        }
+        let scroll = NSTextView.scrollableTextView()
+        scroll.frame = NSRect(x: 0, y: 4, width: 420, height: 128)
+        scroll.borderType = .bezelBorder
+        guard let notes = scroll.documentView as? NSTextView else { return nil }
+        notes.isRichText = false
+        notes.font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
+        notes.string = draft.notes
+        notes.setAccessibilityLabel("备注")
+        accessory.addSubview(title)
+        accessory.addSubview(date)
+        accessory.addSubview(scroll)
+        alert.accessoryView = accessory
+        alert.addButton(withTitle: "确认")
+        alert.addButton(withTitle: "取消").keyEquivalent = "\u{1B}"
+        guard runPreview(alert) == .alertFirstButtonReturn else { return nil }
+
+        var reviewed = draft
+        reviewed.title = title.stringValue
+        reviewed.dueDate = date.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        reviewed.notes = notes.string.trimmingCharacters(in: .whitespacesAndNewlines)
+        return reviewed
     }
 
     private func runPreview(_ alert: NSAlert) -> NSApplication.ModalResponse {
