@@ -1,5 +1,10 @@
 # 本地文字助手 · Local Text Assistant for macOS
 
+[中文](#chinese) · [English](#english)
+
+<a name="chinese"></a>
+## 中文
+
 macOS 菜单栏助手。开启辅助功能权限后，在其他应用中选中文字，浮动面板会显示以下操作：
 
 - **英文润色**：把选区译成自然英文，或润色已有英文。
@@ -46,3 +51,53 @@ pwsh -NoProfile -File ./graph_todo.ps1 -Operation connect
 ## 数据处理
 
 模型请求使用本机回环地址。截图在处理过程中写入临时目录，识别结束后删除。模型可能误识别公式符号或日期，请在使用前核对预览。
+
+---
+
+<a name="english"></a>
+## English
+
+A macOS menu-bar helper. With Accessibility permission, select text in another app to bring up a floating panel:
+
+- **Polish English:** translate to natural English or edit existing English.
+- **Translate into Chinese:** translate the selection into Simplified Chinese.
+- **Clean up:** tidy spaces, line breaks, and punctuation; check that words and numbers were retained.
+- **Add to To Do:** extract tasks and select each one to add. Keep related steps for the same application in one task's notes.
+- **Read aloud:** use macOS voices for Chinese and English. Stop playback from the menu bar.
+
+The first three actions use local Ollama. Edit or copy the result, or replace the selection in apps that support it. Reading and replacing selections depend on the frontmost app's Accessibility support. The floating panel can be paused.
+
+### Screenshots
+
+- **⌘⇧Z** captures a selected area and translates it to Simplified Chinese. The result appears in an editable window and is copied only when you click **Copy**.
+- **⌘⇧Q** extracts screenshot text and formulas, represents formulas as LaTeX, and copies the result automatically.
+- Both commands are available from the menu bar. Global shortcuts require Accessibility permission and take over those key combinations while enabled.
+
+### Build and run
+
+Requires macOS 26+, compatible Xcode Command Line Tools, and system Python 3. Translation, cleanup, OCR, and task extraction also require [Ollama](https://ollama.com/download/mac) and a local model:
+
+```sh
+ollama pull qwen3.5:4b
+sh build.sh
+open "build/Local Text Assistant.app"
+```
+
+Enable selection features from the menu bar and grant Accessibility permission. Screenshots also require Screen Recording permission. You may need to reopen the app after changing permissions.
+
+### Optional Microsoft To Do integration
+
+Install [PowerShell 7](https://learn.microsoft.com/powershell/scripting/install/install-powershell-on-macos) and run:
+
+```sh
+pwsh -NoProfile -Command 'Install-Module Microsoft.Graph.Authentication -Scope CurrentUser'
+pwsh -NoProfile -File ./graph_todo.ps1 -Operation connect
+```
+
+Follow Microsoft's device sign-in. Personal accounts are the default; work or school accounts can try `-Tenant organizations`, subject to organizational policy. The app uses delegated `Tasks.ReadWrite` and writes to the account's default Tasks list. Re-run the connection command if sign-in expires.
+
+Tasks are extracted locally. Review the selection, titles, due dates, and notes before sending. The original request and exact deadline or time zone can be retained in notes. Only confirmed task details go to Microsoft Graph. Authorization cache, account or list bindings, and deduplication records stay on the Mac.
+
+### Data handling
+
+Model requests go to a loopback address. Screenshots are stored temporarily during processing and removed after recognition. Check the preview for misread formula symbols or dates.
