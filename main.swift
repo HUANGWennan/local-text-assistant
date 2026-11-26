@@ -1,5 +1,6 @@
 import AppKit
 import ApplicationServices
+import Carbon
 
 private struct ToDoDraft {
     var title: String
@@ -99,7 +100,16 @@ private final class ToDoSelectionAlert: NSObject {
     }
 }
 
+private enum ScreenshotAction {
+    case ocr, translation
+    var hint: String {
+        self == .ocr ? "拖动框选文字与公式 · Esc 取消" : "拖动框选要翻译的文字 · Esc 取消"
+    }
+}
+
 final class TextHelper: NSObject, NSApplicationDelegate {
+    private var screenshotTap: CFMachPort?
+    private var screenshotTapSource: CFRunLoopSource?
     private let status = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let reader = SelectionSpeechReader()
     private var busy = false
@@ -117,6 +127,7 @@ final class TextHelper: NSObject, NSApplicationDelegate {
         let menu = NSMenu()
         for (title, action) in [
             ("识别截图中的文字与公式", #selector(capture)),
+            ("截图翻译为中文", #selector(captureTranslation)),
             ("朗读所选文字", #selector(speak)),
             ("停止朗读", #selector(stop)),
             ("暂停／继续浮动面板", #selector(togglePanel)),
@@ -128,9 +139,46 @@ final class TextHelper: NSObject, NSApplicationDelegate {
             menu.addItem(item)
         }
         status.menu = menu
+        installScreenshotShortcuts()
     }
 
-    @objc private func capture() {
+    private func installScreenshotShortcuts() {
+        guard screenshotTap == nil, AXIsProcessTrusted() else { return }
+        let eventMask: CGEventMask = 1 << CGEventType.keyDown.rawValue
+        let tap = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .headInsertEventTap,
+                                    options: .defaultTap, eventsOfInterest: eventMask,
+                                    callback: { _, type, event, context in
+            guard let context else { return Unmanaged.passUnretained(event) }
+            let helper = Unmanaged<TextHelper>.fromOpaque(context).takeUnretainedValue()
+            if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+                if let tap = helper.screenshotTap { CGEvent.tapEnable(tap: tap, enable: true) }
+            }
+            let modifiers = event.flags.intersection([.maskCommand, .maskShift, .maskAlternate, .maskControl])
+            guard type == .keyDown, modifiers == [.maskCommand, .maskShift] else {
+                return Unmanaged.passUnretained(event)
+            }
+            let action: ScreenshotAction
+            switch Int(event.getIntegerValueField(.keyboardEventKeycode)) {
+            case kVK_ANSI_Q: action = .ocr
+            case kVK_ANSI_Z: action = .translation
+            default: return Unmanaged.passUnretained(event)
+            }
+            if event.getIntegerValueField(.keyboardEventAutorepeat) == 0 {
+                DispatchQueue.main.async { helper.captureScreenshot(action) }
+            }
+            return nil
+        }, userInfo: Unmanaged.passUnretained(self).toOpaque())
+        guard let tap, let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0) else { return }
+        screenshotTap = tap
+        screenshotTapSource = source
+        CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
+        CGEvent.tapEnable(tap: tap, enable: true)
+    }
+
+    @objc private func capture() { captureScreenshot(.ocr) }
+    @objc private func captureTranslation() { captureScreenshot(.translation) }
+
+    private func captureScreenshot(_ action: ScreenshotAction) {
         guard !busy else { return }
         guard CGPreflightScreenCaptureAccess() || CGRequestScreenCaptureAccess() else {
             showError("请在系统设置中允许录屏，然后重新打开文字助手。")
@@ -139,10 +187,10 @@ final class TextHelper: NSObject, NSApplicationDelegate {
         panel.dismiss()
         busy = true
         status.button?.title = "框选截图…"
-        OCRRegionCapture.begin { result in
+        OCRRegionCapture.begin(hint: action.hint) { result in
             switch result {
             case .success(let url):
-                if let url { self.recognize(url) }
+                if let url { self.recognize(url, action: action) }
                 else { self.finish() }
             case .failure(let error):
                 self.finish(error: error.localizedDescription)
@@ -150,11 +198,11 @@ final class TextHelper: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func recognize(_ screenshot: URL) {
-        status.button?.title = "识别中…"
+    private func recognize(_ screenshot: URL, action: ScreenshotAction) {
+        status.button?.title = action == .translation ? "翻译中…" : "识别中…"
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
-        process.arguments = [Bundle.main.resourceURL!.appendingPathComponent("ocr_capture.py").path, "--file", screenshot.path]
+        process.arguments = [Bundle.main.resourceURL!.appendingPathComponent("ocr_capture.py").path, "--file", screenshot.path] + (action == .translation ? ["--translate"] : [])
         let output = Pipe()
         process.standardOutput = output
         process.standardError = FileHandle.nullDevice
@@ -171,6 +219,11 @@ final class TextHelper: NSObject, NSApplicationDelegate {
             DispatchQueue.main.async {
                 guard let text = result?["text"] as? String, !text.isEmpty else {
                     self.finish(error: result?["error"] as? String ?? "模型未返回识别结果。")
+                    return
+                }
+                if action == .translation {
+                    self.finish()
+                    self.previewText(text, selection: nil, title: "截图翻译为中文")
                     return
                 }
                 NSPasteboard.general.clearContents()
@@ -268,9 +321,9 @@ final class TextHelper: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func previewText(_ text: String, selection: TextSelection) {
+    private func previewText(_ text: String, selection: TextSelection?, title: String = "预览处理结果") {
         let alert = NSAlert()
-        alert.messageText = "预览处理结果"
+        alert.messageText = title
         let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 470, height: 210))
         scroll.hasVerticalScroller = true
         let editor = NSTextView(frame: scroll.bounds)
@@ -282,13 +335,13 @@ final class TextHelper: NSObject, NSApplicationDelegate {
         scroll.documentView = editor
         alert.accessoryView = scroll
         alert.addButton(withTitle: "复制")
-        alert.addButton(withTitle: "替换原选区")
-        alert.addButton(withTitle: "取消")
+        if selection != nil { alert.addButton(withTitle: "替换原选区") }
+        alert.addButton(withTitle: selection == nil ? "关闭" : "取消").keyEquivalent = "\u{1B}"
         let choice = runPreview(alert)
         if choice == .alertFirstButtonReturn {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(editor.string, forType: .string)
-        } else if choice == .alertSecondButtonReturn, !selection.replace(with: editor.string) {
+        } else if choice == .alertSecondButtonReturn, let selection, !selection.replace(with: editor.string) {
             showError("原选区已变化，或当前应用不支持替换。请重新选择文字或使用复制。")
         }
     }

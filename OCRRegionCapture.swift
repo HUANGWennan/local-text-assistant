@@ -6,7 +6,7 @@ final class OCRRegionCapture {
     private static var current: OCRRegionCapture?
     private var windows: [NSWindow] = []
     private var completion: ((Result<URL?, Error>) -> Void)?
-    static func begin(_ completion: @escaping (Result<URL?, Error>) -> Void) {
+    static func begin(hint: String, _ completion: @escaping (Result<URL?, Error>) -> Void) {
         let picker = OCRRegionCapture(); current = picker; picker.completion = completion
         NSApp.activate(ignoringOtherApps: true)
         for screen in NSScreen.screens {
@@ -16,6 +16,7 @@ final class OCRRegionCapture {
             window.sharingType = .none
             window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
             let view = OCRSelectionView(frame: NSRect(origin: .zero, size: screen.frame.size))
+            view.hint = hint
             view.finished = { [weak picker] rect in
                 guard let picker = picker else { return }
                 guard let rect = rect else { picker.finish(.success(nil)); return }
@@ -66,6 +67,7 @@ private final class OCRSelectionWindow: NSWindow {
     override var canBecomeKey: Bool { true }
 }
 private final class OCRSelectionView: NSView {
+    var hint = ""
     var finished: ((CGRect?) -> Void)?
     private var start: CGPoint?
     private var selection = CGRect.zero
@@ -76,8 +78,7 @@ private final class OCRSelectionView: NSView {
             NSColor.white.withAlphaComponent(0.18).setFill(); selection.fill()
             NSColor.systemBlue.setStroke(); let path = NSBezierPath(rect: selection); path.lineWidth = 2; path.stroke()
         }
-        let label = "拖动框选文字与公式 · Esc 取消"
-        label.draw(at: NSPoint(x: 24, y: bounds.height - 54), withAttributes: [.font: NSFont.systemFont(ofSize: 18), .foregroundColor: NSColor.white])
+        hint.draw(at: NSPoint(x: 24, y: bounds.height - 54), withAttributes: [.font: NSFont.systemFont(ofSize: 18), .foregroundColor: NSColor.white])
     }
     override func mouseDown(with event: NSEvent) { start = convert(event.locationInWindow, from: nil) }
     override func mouseDragged(with event: NSEvent) {

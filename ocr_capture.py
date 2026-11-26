@@ -13,14 +13,17 @@ PROMPT = """Transcribe EVERY visible word and mathematical formula from this ima
 Output text in original reading order, retaining headings, line breaks and Chinese/English wording.
 Represent each mathematical expression in Microsoft Word compatible LaTeX, with inline equations in $...$ and separate equations in $$...$$. Matrices: use \\begin{bmatrix} ... \\end{bmatrix}; derivatives, subscripts, fractions, inequalities, Greek symbols must be accurate.
 Do not calculate, correct, interpret or explain any formula. Do not invent text obscured or absent. For unreadable sections use [无法辨认]. No commentary, no markdown code fence."""
-def recognize(image_path: Path):
+TRANSLATE_PROMPT = """Read the text in this image and translate it to natural Simplified Chinese.
+Preserve headings, paragraphs, numbers, and technical meaning. Keep mathematical expressions in LaTeX.
+Output only the Chinese translation. Mark illegible fragments as [无法辨认]."""
+def recognize(image_path: Path, translate=False):
     if not image_path.is_file() or image_path.stat().st_size == 0:
         raise ValueError("截图文件不存在或为空。")
     encoded = base64.b64encode(image_path.read_bytes()).decode("ascii")
     response = chat({
         "model": "qwen3.5:4b",
         "stream": False, "think": False,
-        "messages": [{"role":"user", "content":PROMPT,
+        "messages": [{"role":"user", "content":TRANSLATE_PROMPT if translate else PROMPT,
                       "images":[encoded]}],
         "options":{"temperature":0, "num_ctx":8192, "num_predict":2600},
     }, timeout=180)
@@ -34,6 +37,7 @@ def recognize(image_path: Path):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--file", type=Path)
+    parser.add_argument("--translate", action="store_true")
     parser.add_argument("--capture", action="store_true")
     args = parser.parse_args()
     if not args.capture and args.file is None:
@@ -51,7 +55,7 @@ def main():
             file = temporary
         else:
             file = args.file
-        result = recognize(file)
+        result = recognize(file, translate=args.translate)
         print(json.dumps({"text":result},ensure_ascii=False))
     except Exception as exc:
         print(json.dumps({"error":str(exc)},ensure_ascii=False))
