@@ -124,6 +124,12 @@ final class TextHelper: NSObject, NSApplicationDelegate {
             return self.busy || self.panelPaused || self.showingPreview
         }
         panel.onAction = { [weak self] mode, selection in self?.run(mode, selection: selection) }
+        reader.finished = { [weak self] in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.panel.updateSpeechButton(isSpeaking: self.reader.isSpeaking)
+            }
+        }
         let menu = NSMenu()
         for (title, action) in [
             ("识别截图中的文字与公式", #selector(capture)),
@@ -257,7 +263,12 @@ final class TextHelper: NSObject, NSApplicationDelegate {
             showError("请先在支持辅助功能的应用中选中文字。")
             return
         }
-        reader.start(selection.text)
+        startReading(selection.text)
+    }
+
+    private func startReading(_ text: String) {
+        reader.start(text)
+        panel.updateSpeechButton(isSpeaking: reader.isSpeaking)
     }
 
     @objc private func togglePanel() {
@@ -269,7 +280,7 @@ final class TextHelper: NSObject, NSApplicationDelegate {
     private func run(_ mode: String, selection: TextSelection) {
         guard !busy else { return }
         if mode == "speak" {
-            if reader.isSpeaking { reader.stop() } else { reader.start(selection.text) }
+            if reader.isSpeaking { reader.stop() } else { startReading(selection.text) }
             return
         }
         if mode == "todo" {

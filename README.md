@@ -2,6 +2,8 @@
 
 [中文](#chinese) · [English](#english)
 
+![划词浮窗 / Floating selection toolbar](assets/selection-toolbar.png)
+
 <a name="chinese"></a>
 ## 中文
 
@@ -11,7 +13,7 @@ macOS 菜单栏助手。开启辅助功能权限后，在其他应用中选中�
 - **译为中文**：把选区译成简体中文。
 - **智能清理**：清理多余空格、断行和标点，核对字词与数字是否保留。
 - **加入 To Do**：识别独立待办并逐项选择。同一申请的步骤和要求归到一条任务的备注。
-- **朗读**：使用 macOS 系统语音朗读中文和英文。也可以从菜单栏停止。
+- **朗读**：使用 macOS 系统语音朗读中文和英文。朗读时，浮窗按钮会切换成「停止朗读」，也可以从菜单栏停止。
 
 前三项使用本机 Ollama。结果可以编辑、复制，或在应用支持时替换原选区。选区读取和替换取决于前台应用的辅助功能支持。可从菜单栏暂停浮动面板。
 
@@ -63,7 +65,7 @@ A macOS menu-bar helper. With Accessibility permission, select text in another a
 - **Translate into Chinese:** translate the selection into Simplified Chinese.
 - **Clean up:** tidy spaces, line breaks, and punctuation; check that words and numbers were retained.
 - **Add to To Do:** extract tasks and select each one to add. Keep related steps for the same application in one task's notes.
-- **Read aloud:** use macOS voices for Chinese and English. Stop playback from the menu bar.
+- **Read aloud:** use macOS voices for Chinese and English. The floating button switches to Stop Reading during playback. You can also stop from the menu bar.
 
 The first three actions use local Ollama. Edit or copy the result, or replace the selection in apps that support it. Reading and replacing selections depend on the frontmost app's Accessibility support. The floating panel can be paused.
 
